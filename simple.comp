@@ -10,12 +10,12 @@
  */
 layout(local_size_x=256, local_size_y=1, local_size_z=1) in;
 
-layout (binding=0) buffer a2
+layout (binding=0, std430) buffer a2
 {
 	double outp[];
 };
 
 void main()
 {
-	 outp[gl_GlobalInvocationID.x] += 2.0;
+  outp[gl_GlobalInvocationID.x] += 2.0f;
 }

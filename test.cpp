@@ -9,6 +9,10 @@
 
 using namespace std;
 
+#define BUFFER_SIZE		10240
+#define INCREMENT_PASSES	50000
+#define RUNS			5
+
 void printDeviceProperties(int count, VkPhysicalDeviceProperties& pros) {
 	cout << "---------------------- " << count << " ----------------------" << endl;
 	cout << "apiVersion :" << pros.apiVersion << endl;
@@ -179,7 +183,7 @@ int main() {
 			break;
 	}
 
-	std::array<float, 1> queuePriorities = { 0.0f };
+	std::array<float, 1> queuePriorities = { 1.0f };
 	VkDeviceQueueCreateInfo queueCreateInfo = {};
 	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	queueCreateInfo.queueFamilyIndex = queueIndex;
@@ -232,9 +236,9 @@ int main() {
 	allocateInfo.memoryTypeIndex = 0;
 	VkBufferCreateInfo vBufferInfo;
 	vBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	vBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	vBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	vBufferInfo.flags = 0;
-	vBufferInfo.size = sizeof(double);
+	vBufferInfo.size = sizeof(double) * BUFFER_SIZE;
 	VkBuffer computeBuffer;
 	err = vkCreateBuffer(device, &vBufferInfo, nullptr, &computeBuffer);
 	cout << "vkCreateBuffer : " << err << ", " << computeBuffer << endl;
@@ -252,9 +256,8 @@ int main() {
 	err = vkMapMemory(device, deviceMemory, 0, vBufferInfo.size, 0, &deviceMemoryPtr);
 	cout << "vkMapMemory : " << err << ", " << deviceMemoryPtr << endl;
 
-	double* testData = new double[1];
-	testData[0] = 0;
-	memcpy(deviceMemoryPtr, testData, sizeof(double)* 1);
+	double* testData = new double[BUFFER_SIZE] {0};
+	memcpy(deviceMemoryPtr, testData, sizeof(double)* BUFFER_SIZE);
 
 	vkUnmapMemory(device, deviceMemory);
 
@@ -362,9 +365,10 @@ int main() {
 	vkCmdBindPipeline(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 	vkCmdBindDescriptorSets(computeCmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, 0);
 
-  for(int i = 0; i < 250000; i++) {
-	   vkCmdDispatch(computeCmdBuffer, 1, 1, 1);
-  }
+	for(int j = 0; j < INCREMENT_PASSES; j++) {
+		vkCmdDispatch(computeCmdBuffer, (BUFFER_SIZE / 256), 1, 1);
+		vkCmdPipelineBarrier(computeCmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 0, nullptr);
+	}
 
 	err = vkEndCommandBuffer(computeCmdBuffer);
 	cout << "vkEndCommandBuffer : " << err << endl;
@@ -383,33 +387,39 @@ int main() {
 	computeSubmitInfo.waitSemaphoreCount = 0;
 	computeSubmitInfo.signalSemaphoreCount = 0;
 
-  std::chrono::steady_clock::time_point submit = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
 cout << fixed << setprecision(10);
   // double min = 99999, max = 0, temp = 0;
-  for(int i = 0; i < 5; i++) {
-    submit = std::chrono::steady_clock::now();
-  	err = vkQueueSubmit(queue, 1, &computeSubmitInfo, VK_NULL_HANDLE);
-    // cout << "VkSubmitQueue : " << err << endl;
-    cout << "vkQueueSubmit elapsed : " << chrono::duration_cast<chrono::milliseconds>(std::chrono::steady_clock ::now() - submit).count() << "ms" << std::endl;
-    submit = std::chrono::steady_clock::now();
-    err = vkQueueWaitIdle(queue);
-    // temp = std::chrono::duration<double>(std::chrono::steady_clock ::now() - submit).count();
-    // if (temp > max) max = temp;
-    // else if(temp < min) min = temp;
-    cout << "vkQueueWaitIdle elapsed : " << chrono::duration_cast<chrono::milliseconds>(std::chrono::steady_clock ::now() - submit).count() << "ms" << std::endl;
-  	// cout << "vkQueueWaitIdle : " << err << endl;
+  for(int i = 0; i < RUNS; i++) {
+    std::chrono::steady_clock::time_point submit = std::chrono::steady_clock::now();
 
+  	err = vkQueueSubmit(queue, 1, &computeSubmitInfo, VK_NULL_HANDLE);
+
+    cout << "vkQueueSubmit elapsed : " << chrono::duration_cast<chrono::milliseconds>(std::chrono::steady_clock ::now() - submit).count() << "ms" << std::endl;
+
+    submit = std::chrono::steady_clock::now();
+
+    err = vkQueueWaitIdle(queue);
+
+    cout << "vkQueueWaitIdle elapsed : " << chrono::duration_cast<chrono::milliseconds>(std::chrono::steady_clock ::now() - submit).count() << "ms" << std::endl;
   }
 
-
+	err = vkDeviceWaitIdle(device);
+	cout << "vkQueueWaitIdle elapsed : " << chrono::duration_cast<chrono::milliseconds>(std::chrono::steady_clock ::now() - start).count() << "ms" << std::endl;
   // std::cout << "vkQueueSubmit elapsed : " << std::chrono::duration<double>(std::chrono::steady_clock ::now() - submit).count() << "ms" << std::endl;
   // cout << "min : " << min << ", max : " << max << endl;
-
 	void* endDataPtr;
 	err = vkMapMemory(device, deviceMemory, 0, vBufferInfo.size, 0, &endDataPtr);
-	double* testData2 = new double[1];
-	memcpy(testData2, endDataPtr, sizeof(double)* 1);
+	double* testData2 = new double[BUFFER_SIZE];
+	memcpy(testData2, endDataPtr, sizeof(double)* BUFFER_SIZE);
 
 	cout << "copy result : " << testData2[0] << endl;
+
+	for(int i = 1; i < BUFFER_SIZE; i++) {
+		if (testData2[i] != testData2[i - 1]) {
+			cout << "Corruption at " << i << " : " << testData2[i] << " != " << testData2[i - 1] << endl;
+		}
+	}
 	vkUnmapMemory(device, deviceMemory);
+
 }
